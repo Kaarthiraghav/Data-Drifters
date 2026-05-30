@@ -11,9 +11,17 @@ df = load_data()
 # --- Filters ---
 col1, col2, col3 = st.columns(3)
 
-province    = col1.selectbox("Province",     ["All"] + sorted(df['Province'].unique().tolist()))
-distributor = col2.selectbox("Distributor",  ["All"] + sorted(df['Distributor_ID'].unique().tolist()))
-otype       = col3.selectbox("Outlet Type",  ["All"] + sorted(df['Outlet_Type'].unique().tolist()))
+province = col1.selectbox("Province", ["All"] + sorted(df['Province'].unique().tolist()))
+
+# Filter distributors based on selected province
+if province != "All":
+    available_distributors = sorted(df[df['Province'] == province]['Distributor_ID'].unique().tolist())
+else:
+    available_distributors = sorted(df['Distributor_ID'].unique().tolist())
+
+distributor = col2.selectbox("Distributor", ["All"] + available_distributors)
+
+otype = col3.selectbox("Outlet Type", ["All"] + sorted(df['Outlet_Type'].unique().tolist()))
 
 filtered = df.copy()
 if province    != "All": filtered = filtered[filtered['Province']      == province]
