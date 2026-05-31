@@ -11,54 +11,68 @@ PROVINCE_MAP = {
 
 @st.cache_data
 def load_data():
-    # Load each file
-    features    = pd.read_csv('../gold/outlet_features.csv')
     predictions = pd.read_csv('../output/Data_Drifters_predictions.csv')
-    master      = pd.read_csv('../silver/outlet_master.csv')
+    features    = pd.read_csv('../gold/outlet_features.csv')
     coords      = pd.read_csv('../silver/outlet_coordinates.csv')
 
-    # Merge everything on Outlet_ID
-    df = predictions.merge(features[[ 
-        'Outlet_ID', 'Distributor_ID', 'Outlet_Type', 'Outlet_Size',
-        'Cooler_Count', 'censorship_ratio', 'coeff_of_variation',
-        'poi_total_count', 'nearby_outlet_count', 'poi_relative_density',
-        'jan_holiday_count', 'avg_bill_value'
-    ]], on='Outlet_ID', how='left')
-
+    # Merge
+    df = predictions.merge(
+        features[[
+            'Outlet_ID', 'Distributor_ID', 'Outlet_Type', 'Outlet_Size',
+            'Cooler_Count', 'censorship_ratio', 'coeff_of_variation',
+            'poi_total_count', 'nearby_outlet_count', 'poi_relative_density',
+            'jan_holiday_count', 'avg_bill_value', 'competitor_density',
+        ]],
+        on='Outlet_ID', how='left'
+    )
     df = df.merge(coords, on='Outlet_ID', how='left')
 
-    # Add province
+    # Province
     df['Province'] = df['Distributor_ID'].map(PROVINCE_MAP).fillna('Unknown')
 
-    # Derived columns
-    df['lift']     = df['predicted_jan_2026_potential'] - df['observed_avg_monthly']
-    df['lift_pct'] = (df['lift'] / df['observed_avg_monthly'] * 100).round(1)
+    # Derived
+    df['lift']     = (df['predicted_jan_2026_potential'] - df['observed_avg_monthly']).round(1)
+    df['lift_pct'] = (df['lift'] / df['observed_avg_monthly'].replace(0, np.nan) * 100).round(1)
 
-    # Placeholder columns for SHAP + LLM (swap when teammates deliver)
-    if 'shap_feature_1' not in df.columns:
+    # Budget allocation — load if exists, else zeros
+    try:
+        budget = pd.read_csv('../output/Data_Drifters_budget_allocations.csv')
+        df = df.merge(budget, on='Outlet_ID', how='left')
+        df['Trade_Spend_Allocation_LKR'] = df['Trade_Spend_Allocation_LKR'].fillna(0)
+    except FileNotFoundError:
+        df['Trade_Spend_Allocation_LKR'] = 0.0
+
+    # AI explanations — load if exists, else fallback
+    try:
+        explanations = pd.read_csv('../output/outlet_ai_explanations.csv')
+        df = df.merge(explanations[['Outlet_ID', 'ai_explanation']], on='Outlet_ID', how='left')
+    except FileNotFoundError:
+        df['ai_explanation'] = None
+
+    # Fallback explanation for missing
+    mask = df['ai_explanation'].isna() | (df['ai_explanation'] == 'Explanation unavailable')
+    df.loc[mask, 'ai_explanation'] = df[mask].apply(lambda r: (
+        f"This {r.get('Outlet_Type','outlet')} is predicted to reach "
+        f"{r['predicted_jan_2026_potential']:.0f}L in January 2026, "
+        f"a {r['lift_pct']:.1f}% uplift over its historical average of "
+        f"{r['observed_avg_monthly']:.0f}L. "
+        f"{'Supply constraints have historically capped this outlet below its true demand.' if r['is_constrained'] else 'This outlet is operating closer to its natural ceiling.'} "
+        f"Recommendation: {'Prioritise for cooler deployment and discount incentives.' if r['lift_pct'] > 50 else 'Support with light merchandising.'}"
+    ), axis=1)
+
+    # SHAP columns — load if exists, else use feature values as proxy
+    shap_cols = ['shap_feature_1','shap_value_1','shap_feature_2','shap_value_2','shap_feature_3','shap_value_3']
+    if not all(c in df.columns for c in shap_cols):
         df['shap_feature_1'] = 'censorship_ratio'
-        df['shap_value_1']   = df['censorship_ratio'].round(3)
-        df['shap_feature_2'] = 'poi_relative_density'
-        df['shap_value_2']   = df['poi_relative_density'].round(3)
+        df['shap_value_1']   = df['censorship_ratio'].fillna(0).round(3)
+        df['shap_feature_2'] = 'competitor_density'
+        df['shap_value_2']   = df['competitor_density'].fillna(0).round(3)
         df['shap_feature_3'] = 'growth_ratio'
-        df['shap_value_3']   = df['growth_ratio'].round(3)
-
-    if 'llm_explanation' not in df.columns:
-        df['llm_explanation'] = df.apply(lambda r: (
-            f"This {r['Outlet_Type']} is predicted to reach "
-            f"{r['predicted_jan_2026_potential']:.0f}L in January 2026, "
-            f"a {r['lift_pct']:.1f}% uplift over its historical average of "
-            f"{r['observed_avg_monthly']:.0f}L. "
-            f"Key driver: censorship ratio of {r['censorship_ratio']:.2f} "
-            f"suggests supply constraints have capped past sales."
-        ), axis=1)
-
-    if 'trade_spend_lkr' not in df.columns:
-        df['trade_spend_lkr'] = 0.0
-        df['spend_type']      = 'none'
+        df['shap_value_3']   = df['growth_ratio'].fillna(0).round(3)
 
     return df
 
 
+@st.cache_data
 def load_transactions():
     return pd.read_csv('../silver/transactions_clean.csv')
