@@ -103,8 +103,7 @@ The app will open automatically at **http://localhost:8501**
 
 ## Data Requirements
 
-The app reads from these files
-Due to file size restriction in GitHub, the csv files need to added manually from the main code:
+The app reads from these files. Due to file size restriction in GitHub, the csv files need to added manually from the main code:
 
 | File | Location |
 |---|---|
